@@ -1,168 +1,253 @@
+@push('scripts')
 <script>
-jQuery(function () {
+jQuery(function ($) {
+    // CSRF Token for all AJAX requests
+    $.ajaxSetup({
+        headers: {
+            'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+        }
+    });
+
+    // Dashboard Tab Persistence
+    $('#dashboardTabs button').on('shown.bs.tab', function (e) {
+        localStorage.setItem('activeDashboardTab', $(e.target).attr('data-bs-target'));
+    });
+
+    var activeTab = localStorage.getItem('activeDashboardTab');
+    if (activeTab) {
+        $(`#dashboardTabs button[data-bs-target="${activeTab}"]`).tab('show');
+    }
+
+    // Handle Select All checkbox
+    $('#selectAll').on('change', function() {
+        $('.merge-check').prop('checked', $(this).prop('checked'));
+    });
+
+    // STORE CONTACT
     $('#contactForm').on('submit', function(e) {
         e.preventDefault();
         var formData = new FormData(this);
+        var submitBtn = $(this).find('button[type="submit"]');
+
+        submitBtn.prop('disabled', true).html('<span class="spinner-border  spinner-border-sm me-2"></span>Saving...');
+
         clearErrors();
         $.ajax({
             url: '{{ route('contacts.store') }}',
             type: 'POST',
             data: formData,
-            processData: false,     
-            contentType: false,     
+            processData: false,
+            contentType: false,
             success: function(response) {
-                alert(response.message);
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Contact Saved',
+                    text: response.message,
+                    timer: 2000,
+                    showConfirmButton: false,
+                    position: 'top-end',
+                    toast: true
+                });
+
+                $('#addContactModal').modal('hide');
                 $('#contactForm')[0].reset();
-                var row = `<tr id="row-${response.data.id}">
-                    <td><input type="checkbox" class="merge-check" value="${response.data.id}"></td>
-                    <td>${response.data.name}</td>
-                    <td>${response.data.email}</td>
-                    <td>${response.data.phone}</td>
-                    <td>${response.data.gender}</td>
-                    <td class="contact-status">
-                        ${response.data.is_merged && response.data.merged_into_name
-                            ? `<span class="badge bg-warning">Merged into ${response.data.merged_into_name}</span>`
-                            : `<span class="badge bg-success">Active</span>`
-                        }
-                    </td>
-                    <td>
-                        <button class="btn btn-sm btn-primary editBtn" data-id="${response.data.id}"><i class="bi bi-pencil-square"></i></button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteContact(${response.data.id})"><i class="bi bi-trash"></i></button>
-                    </td>
-                </tr>`;
-                $('#contactTableBody').append(row);
+                refreshTable();
             },
             error: function(xhr) {
                 if (xhr.status === 422) {
                     showErrors(xhr.responseJSON.errors);
+                } else {
+                    Swal.fire('Error', 'An unexpected error occurred.', 'error');
                 }
+            },
+            complete: function() {
+                submitBtn.prop('disabled', false).html('Save Contact');
             }
         });
     });
-});
 
-// EDIT
-$(document).on('click', '.editBtn', function () {
-    var id = $(this).data('id');
-    $.get('/contacts/' + id + '/edit', function (res) {
-        //console.log(res);       
-        // debugger;
-        $('#editModalContainer').html(res);
-        $('#editModal').modal('show');
+    // EDIT CONTACT
+    $(document).on('click', '.editBtn', function (e) {
+        e.preventDefault();
+        var id = $(this).data('id');
+        var originalHtml = $(this).html();
+        $(this).html('<span class="spinner-border spinner-border-sm"></span>');
+
+        $.get('/contacts/' + id + '/edit', function (res) {
+            $('#editModalContainer').html(res);
+            $('#editModal').modal('show');
+            $('.editBtn[data-id="' + id + '"]').html(originalHtml);
+        });
     });
-});
 
-// MERGE
-$(document).on('click', '.mergeBtn', function () {
-    var selected = $('.merge-check:checked');
-    // console.log(selected);
-    if (selected.length !== 2) {
-        alert('Please select exactly 2 contacts.');
-        return;
-    }
+    // UPDATE CONTACT
+    $(document).on('submit', '#editContactForm', function (e) {
+        e.preventDefault();
+        var id = $(this).find('input[name="id"]').val();
+        var formData = new FormData(this);
+        var submitBtn = $(this).find('button[type="submit"]');
 
-    var ids = selected.map(function () { return $(this).val(); }).get();
-    $.get("{{ route('contacts.merge.form') }}", {
-        contact1_id: ids[0],
-        contact2_id: ids[1]
-    }, function (html) {
-        $('#mergeModalContainer').html(html);
-        $('#mergeModal').modal('show');
-    });
-});
+        submitBtn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-2"></span>Updating...');
 
-// UPDATE
-$(document).on('submit', '#editContactForm', function (e) {
-    e.preventDefault();
-    var id = $(this).find('input[name="id"]').val();
-    var formData = new FormData(this);
-    clearErrors();
-    $.ajax({
-        type: 'POST',
-        url: '/contacts/update/' + id,
-        data: formData,
-        contentType: false,
-        processData: false,
-        success: function (res) {
-            alert(res.message);
-            $('#editModal').modal('hide');
-            var contact = res.data;
-            console.log(contact);
-            var row = $(`#row-${contact.id}`);
-            row.find('.contact-name').text(contact.name);
-            row.find('.contact-email').text(contact.email);
-            row.find('.contact-phone').text(contact.phone);
-            row.find('.contact-gender').text(contact.gender);
-        },
-        error: function (err) {
-            console.log(err);
-            showErrors(err.responseJSON.errors,'#editModal');
-        }
-    });
-});
-
-// MERGE FORM SUBMIT
-$(document).on('submit', '#mergeForm', function (e) {  
-    // alert('Merge Form Submitted');
-    // debugger;
-    e.preventDefault();
-    var formData = new FormData(this);
-    clearErrors();
-
-    if (confirm('Are you sure you want to merge these two contacts?')) {
+        clearErrors();
         $.ajax({
             type: 'POST',
-            url: "{{ route('contacts.merge') }}",
+            url: '/contacts/update/' + id,
             data: formData,
             contentType: false,
             processData: false,
             success: function (res) {
-                alert(res.message);
-                $('#mergeModal').modal('hide');
-                // Optionally wait before reload
-                setTimeout(function () {
-                    location.reload();
-                }, 300);
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Update Complete',
+                    text: res.message,
+                    timer: 2000,
+                    showConfirmButton: false,
+                    position: 'top-end',
+                    toast: true
+                });
+                $('#editModal').modal('hide');
+                refreshTable();
             },
             error: function (err) {
-                console.log(err);
                 if (err.status === 422) {
-                    alert(err.responseJSON.message);
+                    showErrors(err.responseJSON.errors, '#editModal');
+                } else {
+                    Swal.fire('Error', 'Failed to update contact.', 'error');
                 }
-                // $('#mergeModal').modal('show');
+            },
+            complete: function() {
+                submitBtn.prop('disabled', false).html('Save Changes');
             }
         });
-    }
-}); 
+    });
 
-$(document).on('keyup', '#globalSearch', function (e) {
-    var input = $(this).val();
-    $.ajax({
-        url: "{{ route('contacts.search') }}",
-        type: 'GET',
-        data: { filter: input },
-        success: function(response) {
-            // $('#contactTableBody').html('');
-            $('#contactTableBody').html(response.html);
+    // SEARCH (DEBOUNCED)
+    let searchTimer;
+    $('#globalSearch').on('input', function () {
+        clearTimeout(searchTimer);
+        let query = $(this).val();
+        searchTimer = setTimeout(function() {
+            $.ajax({
+                url: "{{ route('contacts.search') }}",
+                type: 'GET',
+                data: { filter: query },
+                success: function(response) {
+                    $('#contactTableBody').html(response.html);
+                }
+            });
+        }, 300);
+    });
+
+    // MERGE ACTION
+    $(document).on('click', '.mergeBtn', function () {
+        var selected = $('.merge-check:checked');
+        if (selected.length !== 2) {
+            Swal.fire({
+                title: 'Invalid Selection',
+                text: 'Select exactly 2 contacts to merge.',
+                icon: 'info',
+                confirmButtonColor: '#4f46e5'
+            });
+            return;
         }
+
+        var ids = selected.map(function () { return $(this).val(); }).get();
+        $.get("{{ route('contacts.merge.form') }}", {
+            contact1_id: ids[0],
+            contact2_id: ids[1]
+        }, function (html) {
+            $('#mergeModalContainer').html(html);
+            $('#mergeModal').modal('show');
+        });
+    });
+
+    // MERGE SUBMIT
+    $(document).on('submit', '#mergeForm', function (e) {
+        e.preventDefault();
+        var formData = new FormData(this);
+
+        Swal.fire({
+            title: 'Confirm Merge Operation',
+            text: "This will consolidate contact data. Continue?",
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#4f46e5',
+            cancelButtonColor: '#94a3b8',
+            confirmButtonText: 'Yes, merge data'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                $.ajax({
+                    type: 'POST',
+                    url: "{{ route('contacts.merge') }}",
+                    data: formData,
+                    contentType: false,
+                    processData: false,
+                    success: function (res) {
+                        Swal.fire('Merged!', res.message, 'success');
+                        $('#mergeModal').modal('hide');
+                        setTimeout(() => location.reload(), 1500);
+                    },
+                    error: function (err) {
+                        if (err.status === 422) {
+                            Swal.fire('Operation Blocked', err.responseJSON.message, 'error');
+                        }
+                    }
+                });
+            }
+        });
     });
 });
 
 function deleteContact(id) {
-    if (confirm('Delete this contact?')) {
-        $.ajax({
-            url: '/contacts/' + id,
-            type: 'DELETE',
-            data: {_token: '{{ csrf_token() }}'},
-            success: function(response) {
-                alert(response.message);
-                $('#row-' + id).remove();
-            }
-        });
-    }
+    Swal.fire({
+        title: 'Delete Contact?',
+        text: "This action will permanently remove the contact record.",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        cancelButtonColor: '#94a3b8',
+        confirmButtonText: 'Permanently Delete'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            $.ajax({
+                url: '/contacts/delete/' + id,
+                type: 'DELETE',
+                data: {_token: '{{ csrf_token() }}'},
+                success: function(response) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Deleted',
+                        text: response.message,
+                        timer: 1500,
+                        showConfirmButton: false,
+                        toast: true,
+                        position: 'top-end'
+                    });
+                    $('#row-' + id).fadeOut(300, function() { $(this).remove(); });
+                },
+                error: function() {
+                    Swal.fire('Error', 'Deletion failed. Contact may already be removed.', 'error');
+                }
+            });
+        }
+    });
 }
 
-function showErrors(errors,container = '') {
+function refreshTable() {
+    let query = $('#globalSearch').val();
+    $.ajax({
+        url: "{{ route('contacts.search') }}",
+        type: 'GET',
+        data: { filter: query },
+        success: function(response) {
+            $('#contactTableBody').html(response.html);
+        }
+    });
+}
+
+function showErrors(errors, container = '') {
+    $('.error-text').text('');
     $.each(errors, function (key, val) {
         $(`${container} .${key}_error`).text(val[0]);
     });
@@ -172,3 +257,4 @@ function clearErrors() {
     $('.error-text').text('');
 }
 </script>
+@endpush

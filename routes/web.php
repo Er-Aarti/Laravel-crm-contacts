@@ -15,9 +15,8 @@ use App\Http\Controllers\CustomFieldController;
 |
 */
 
-Route::get('/', function () {
-    return view('welcome');
-});
+Route::get('/', [ContactController::class, 'index'])->name('home');
+
 
 // Route::resource('contacts', ContactController::class);
 Route::resource('contacts', ContactController::class)->except([

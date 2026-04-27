@@ -13,27 +13,30 @@ class ContactController extends Controller
     public function index(Request $request)
     {
         $contacts = Contact::with('mergedInto')->get();
-        // dd($contacts->toArray());
         $customFields = CustomField::all();
-        // dd($contacts->toArray());
+        
         if ($request->ajax()) {
-            if ($request->name) {
-                $contacts->where('name', $request->name);
+            // Simplified AJAX search return
+            if ($request->has('filter')) {
+                $data = $request->filter;
+                $contacts = Contact::where('name', 'like', "%$data%")
+                    ->orWhere('email', 'like', "%$data%")
+                    ->orWhere('phone', 'like', "%$data%")
+                    ->orWhere('gender', 'like', "%$data%")
+                    ->get();
+                return response()->json([
+                    'html' => view('contacts.partials.table', compact('contacts'))->render()
+                ]);
             }
-            if ($request->email) {
-                $contacts->where('email', $request->email);
-            }
-            if ($request->gender) {
-                $contacts->where('gender', $request->gender);
-            }
-            $contacts = $contacts->all();
-            return response()->json(view('contacts.index', compact('contacts'))->render());
         }
-        $contacts = $contacts->all();
-        $customFields = CustomField::all();
-        view()->share('customFields',$customFields);
-        return view('contacts.index', compact('contacts', 'customFields'));
+
+        return view('contacts.index', [
+            'contacts' => $contacts,
+            'customFields' => $customFields,
+            'allCustomFields' => $customFields // For management tab
+        ]);
     }
+
 
     public function store(Request $request)
     {
